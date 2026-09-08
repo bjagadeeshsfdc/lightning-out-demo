@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lightning Out 2.0 Demo — External Page</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 20px;
+            background: #f4f6f9;
+        }
+        h1 { color: #032d60; }
+        .demo-container {
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-top: 24px;
+            min-height: 200px;
+        }
+        .status { color: #706e6b; font-style: italic; }
+        .status-connected { color: #2e844a; font-style: normal; font-weight: 600; }
+        .status-error { color: #c23934; }
+        #login-btn {
+            background: #0070d2;
+            color: white;
+            border: none;
+            padding: 10px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        #login-btn:hover { background: #005fb2; }
+        #login-btn:disabled { background: #c9c7c5; cursor: not-allowed; }
+        .info-box {
+            background: #eef4ff;
+            border-left: 4px solid #0070d2;
+            padding: 12px 16px;
+            margin-top: 16px;
+            border-radius: 0 4px 4px 0;
+            font-size: 14px;
+        }
+        .log-box {
+            background: #f9f9f9;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 12px;
+            margin-top: 16px;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+    <h1>&#9889; Lightning Out 2.0 Demo</h1>
+    <p>This is a <strong>third-party external page</strong> (hosted on GitHub Pages) that embeds a Salesforce LWC component using <strong>Lightning Out 2.0</strong>.</p>
+
+    <div class="info-box">
+        <strong>How it works:</strong> Click the button below to authenticate via OAuth.
+        A popup will open for Salesforce login (you may already be logged in and it will close quickly).
+        Then the LWC component will render inside a secure iframe below.
+    </div>
+
+    <div style="margin-top: 20px;">
+        <button id="login-btn">Connect to Salesforce</button>
+        <p id="status" class="status">Not connected</p>
+    </div>
+
+    <div class="demo-container">
+        <h2>Embedded Salesforce Component</h2>
+        <div id="lightning-container">
+            <p style="color: #706e6b;">Click "Connect to Salesforce" above to load the LWC.</p>
+        </div>
+    </div>
+
+    <div id="log-container" class="log-box" style="display:none;"></div>
+
+    <!-- Lightning Out 2.0 script from the org -->
+    <script type="text/javascript" async="async"
+            src="https://nandini007-dev-ed.my.salesforce.com/lightning/lightning.out.latest/index.iife.prod.js">
+    </script>
+
+    <script>
+        // ============================================================
+        // CONFIGURATION
+        // ============================================================
+        var APP_ID = '1UsNS0000000G810AE';
+        var COMPONENTS = 'c-hello-lightning-out';
+        var ORG_URL = 'https://nandini007-dev-ed.my.salesforce.com';
+        var CLIENT_ID = '3MVG9d8..z.hDcPKAry4Xit91UIVOAgMtW4Iafca.2iP2QrNlK_y0XdEmGCl_kxacLa50V_tE3qobj1CqT_D4';
+        // Use the current page as the OAuth callback (implicit flow redirects back here with hash)
+        var CURRENT_URL = window.location.href.split('#')[0].split('?')[0];
+
+        function log(msg) {
+            var el = document.getElementById('log-container');
+            el.style.display = 'block';
+            el.textContent = el.textContent + new Date().toLocaleTimeString() + ' - ' + msg + '\n';
+            el.scrollTop = el.scrollHeight;
+        }
+
+        // ============================================================
+        // Check for OAuth callback (token in URL hash)
+        // ============================================================
+        function checkForOAuthCallback() {
+            var hash = window.location.hash;
+            if (hash) {
+                var params = new URLSearchParams(hash.substring(1));
+                var accessToken = params.get('access_token');
+                if (accessToken) {
+                    log('Got OAuth access token from callback (length: ' + accessToken.length + ')');
+                    // Clear the hash from URL
+                    history.replaceState(null, '', CURRENT_URL);
+                    initLightningOut(accessToken);
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // ============================================================
+        // If returning from OAuth with a token, initialize immediately
+        // Otherwise, set up the login button
+        // ============================================================
+        if (!checkForOAuthCallback()) {
+            document.getElementById('login-btn').addEventListener('click', function() {
+                var btn = document.getElementById('login-btn');
+                var statusEl = document.getElementById('status');
+                btn.disabled = true;
+                statusEl.textContent = 'Opening Salesforce login...';
+                statusEl.className = 'status';
+                log('Starting OAuth implicit flow...');
+
+                // Build OAuth authorization URL
+                var authUrl = ORG_URL + '/services/oauth2/authorize'
+                    + '?response_type=token'
+                    + '&client_id=' + encodeURIComponent(CLIENT_ID)
+                    + '&redirect_uri=' + encodeURIComponent(CURRENT_URL);
+
+                log('Redirect URI: ' + CURRENT_URL);
+
+                // Open popup for OAuth
+                var popup = window.open(authUrl, 'SFAuth', 'width=600,height=700');
+
+                // Poll the popup to detect when it redirects back with the token
+                var checkPopup = setInterval(function() {
+                    try {
+                        if (popup.closed) {
+                            clearInterval(checkPopup);
+                            if (!checkForOAuthCallback()) {
+                                log('Popup closed without token');
+                                btn.disabled = false;
+                                statusEl.textContent = 'Login was cancelled or failed';
+                                statusEl.className = 'status-error';
+                            }
+                            return;
+                        }
+                        // Try to read the popup URL (will fail if cross-origin)
+                        var popupUrl = popup.location.href;
+                        if (popupUrl.indexOf(CURRENT_URL) === 0) {
+                            var popupHash = popup.location.hash;
+                            if (popupHash) {
+                                var popupParams = new URLSearchParams(popupHash.substring(1));
+                                var token = popupParams.get('access_token');
+                                if (token) {
+                                    clearInterval(checkPopup);
+                                    popup.close();
+                                    log('Got token from popup (length: ' + token.length + ')');
+                                    initLightningOut(token);
+                                }
+                            }
+                        }
+                    } catch(e) {
+                        // Cross-origin — still waiting for redirect back to our domain
+                    }
+                }, 500);
+
+                // Timeout after 2 minutes
+                setTimeout(function() {
+                    clearInterval(checkPopup);
+                    if (!popup.closed) popup.close();
+                    btn.disabled = false;
+                }, 120000);
+            });
+        }
+
+        // ============================================================
+        // Exchange OAuth token for frontdoor URL (client-side)
+        // ============================================================
+        function initLightningOut(accessToken) {
+            var statusEl = document.getElementById('status');
+            var btn = document.getElementById('login-btn');
+            statusEl.textContent = 'Got OAuth token! Getting frontdoor URL...';
+            statusEl.className = 'status';
+            btn.disabled = true;
+
+            log('Calling lightningoutsingleaccess client-side...');
+
+            var xhr = new XMLHttpRequest();
+            xhr.open('POST', ORG_URL + '/services/oauth2/lightningoutsingleaccess', true);
+            xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+            xhr.onload = function() {
+                log('lightningoutsingleaccess status: ' + xhr.status);
+                if (xhr.status === 200) {
+                    try {
+                        var data = JSON.parse(xhr.responseText);
+                        log('Response keys: ' + Object.keys(data).join(', '));
+                        var frontdoorUrl = data.frontdoor_uri || data.frontdoor_url;
+                        if (frontdoorUrl) {
+                            log('Got frontdoor URL: ' + frontdoorUrl.substring(0, 80) + '...');
+                            statusEl.textContent = 'Loading component...';
+                            renderComponent(frontdoorUrl);
+                            return;
+                        }
+                    } catch(e) {
+                        log('Parse error: ' + e.message);
+                    }
+                }
+                log('Response: ' + xhr.responseText.substring(0, 300));
+                // Fallback: try singleaccess endpoint
+                log('Trying standard singleaccess endpoint...');
+                trySingleAccess(accessToken);
+            };
+            xhr.onerror = function() {
+                log('XHR error on lightningoutsingleaccess — trying singleaccess...');
+                trySingleAccess(accessToken);
+            };
+            xhr.send('access_token=' + encodeURIComponent(accessToken));
+        }
+
+        function trySingleAccess(accessToken) {
+            var statusEl = document.getElementById('status');
+            var btn = document.getElementById('login-btn');
+
+            var xhr2 = new XMLHttpRequest();
+            xhr2.open('POST', ORG_URL + '/services/oauth2/singleaccess', true);
+            xhr2.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+            xhr2.onload = function() {
+                log('singleaccess status: ' + xhr2.status);
+                if (xhr2.status === 200) {
+                    try {
+                        var data = JSON.parse(xhr2.responseText);
+                        log('singleaccess response keys: ' + Object.keys(data).join(', '));
+                        var frontdoorUrl = data.frontdoor_uri || data.frontdoor_url;
+                        if (frontdoorUrl) {
+                            log('Got frontdoor URL from singleaccess: ' + frontdoorUrl.substring(0, 80) + '...');
+                            statusEl.textContent = 'Loading component...';
+                            renderComponent(frontdoorUrl);
+                            return;
+                        }
+                    } catch(e) {
+                        log('Parse error: ' + e.message);
+                    }
+                }
+                log('singleaccess response: ' + xhr2.responseText.substring(0, 300));
+                // Final fallback: use direct frontdoor.jsp
+                log('Using direct frontdoor.jsp fallback...');
+                var fallbackUrl = ORG_URL + '/secur/frontdoor.jsp?sid=' + encodeURIComponent(accessToken);
+                renderComponent(fallbackUrl);
+            };
+            xhr2.onerror = function() {
+                log('singleaccess XHR error — using frontdoor.jsp fallback...');
+                var fallbackUrl = ORG_URL + '/secur/frontdoor.jsp?sid=' + encodeURIComponent(accessToken);
+                renderComponent(fallbackUrl);
+            };
+            xhr2.send('access_token=' + encodeURIComponent(accessToken));
+        }
+
+        // ============================================================
+        // Render the Lightning Out 2.0 component
+        // ============================================================
+        function renderComponent(frontdoorUrl) {
+            var statusEl = document.getElementById('status');
+            var btn = document.getElementById('login-btn');
+            var container = document.getElementById('lightning-container');
+
+            log('Creating lightning-out-application...');
+            container.innerHTML = '';
+
+            // Create the lightning-out-application web component
+            var app = document.createElement('lightning-out-application');
+            app.setAttribute('app-id', APP_ID);
+            app.setAttribute('components', COMPONENTS);
+            app.setAttribute('frontdoor-url', frontdoorUrl);
+
+            // Listen for lifecycle events
+            app.addEventListener('lo.application.ready', function() {
+                log('SUCCESS! lo.application.ready fired!');
+                statusEl.textContent = 'Component loaded successfully!';
+                statusEl.className = 'status-connected';
+                btn.style.display = 'none';
+            });
+
+            app.addEventListener('lo.application.error', function(e) {
+                var msg = 'Unknown error';
+                if (e.detail) {
+                    msg = e.detail.message ? e.detail.message : JSON.stringify(e.detail);
+                }
+                log('ERROR: ' + msg);
+                statusEl.textContent = 'Error: ' + msg;
+                statusEl.className = 'status-error';
+                btn.disabled = false;
+            });
+
+            container.appendChild(app);
+
+            // Create the actual LWC component
+            var comp = document.createElement('c-hello-lightning-out');
+            container.appendChild(comp);
+
+            log('Waiting for component to initialize...');
+
+            // Timeout after 30 seconds
+            setTimeout(function() {
+                var cls = statusEl.className;
+                if (cls.indexOf('connected') === -1 && cls.indexOf('error') === -1) {
+                    log('TIMEOUT after 30s');
+                    statusEl.textContent = 'Timed out. Check debug log below.';
+                    statusEl.className = 'status-error';
+                    btn.disabled = false;
+                }
+            }, 30000);
+        }
+    </script>
+</body>
+</html>
